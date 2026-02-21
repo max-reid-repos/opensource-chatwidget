@@ -137,6 +137,12 @@ The widget accepts these props:
 
 ## TODO
 
+### High Priority
+- [ ] **Email capture** — Let visitors enter their email before chatting so you can follow up
+- [ ] **Fix auto-response** — Only show "we'll get back to you" on the first message, not subsequent ones
+- [ ] **Telegram replies** — Make replies sent via Telegram actually appear in the chat widget (currently broken)
+
+### Nice to Have
 - [ ] Extract Telegram notification as optional plugin
 - [ ] Add proper TypeScript interfaces for db helpers
 - [ ] Create standalone npm package with db adapter interface
