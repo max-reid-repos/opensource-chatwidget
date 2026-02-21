@@ -116,16 +116,32 @@ export default function Layout({ children }) {
 }
 ```
 
-## TODO for Open Source Release
+## Configuration
 
-- [ ] Remove MenuCapture-specific branding from component
-- [ ] Make categories configurable via props
-- [ ] Make localStorage keys configurable
+The widget accepts these props:
+
+```tsx
+<ChatWidget
+  teamName="Acme Support"
+  avatarInitials="AC"
+  headerTitle="Acme Support"
+  welcomeMessage="Welcome! How can we help you today?"
+  storageKeyPrefix="acme-chat"
+  pollIntervalMs={5000}
+  categories={[
+    { id: 'sales', label: 'Sales', icon: '💰', description: 'Pricing and plans' },
+    { id: 'support', label: 'Support', icon: '🛠️', description: 'Get help' },
+  ]}
+/>
+```
+
+## TODO
+
 - [ ] Extract Telegram notification as optional plugin
 - [ ] Add proper TypeScript interfaces for db helpers
 - [ ] Create standalone npm package with db adapter interface
 - [ ] Add WebSocket option for real-time (instead of polling)
-- [ ] Add theming/styling options
+- [ ] Add theming/styling options (colors, fonts, positioning)
 
 ## Security Notes
 

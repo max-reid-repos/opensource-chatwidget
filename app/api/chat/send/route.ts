@@ -154,18 +154,8 @@ export async function POST(request: NextRequest) {
     let autoResponse: string | null = null;
 
     if (isFirstVisitorMessage) {
-      autoResponse = "Thanks for your message! We'll get back to you within a few hours. For immediate assistance, email us at support@menucapture.com";
-
-      // Category-specific responses
-      if (category === 'demo') {
-        autoResponse = "Thanks for your interest in a demo! We'll reach out within 24 hours to schedule a time that works for you.";
-      } else if (category === 'pricing') {
-        autoResponse = "Thanks for your pricing question! Our team will provide detailed pricing information within a few hours.";
-      } else if (category === 'feature') {
-        autoResponse = "We appreciate your feature suggestion! Our product team reviews all feedback and will consider it for future updates.";
-      } else if (category === 'support') {
-        autoResponse = "We're here to help! Our support team will respond within a few hours to assist you.";
-      }
+      // Default auto-response - customize this for your use case
+      autoResponse = "Thanks for your message! We'll get back to you as soon as possible.";
 
       // Store the auto-response in database as well
       if (autoResponse) {

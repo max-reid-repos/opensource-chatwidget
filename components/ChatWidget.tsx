@@ -3,7 +3,7 @@
 /**
  * Chat Widget Component
  *
- * SECURITY FIX: Use server-issued signed tokens instead of localStorage visitor IDs
+ * A secure, embeddable chat widget with server-issued signed tokens.
  * - Tokens are cryptographically signed by server
  * - Tied to IP address and User-Agent (fingerprinting)
  * - Cannot be spoofed or used to read other visitors' messages
@@ -21,21 +21,49 @@ interface Message {
   category?: string;
 }
 
-type ChatCategory = {
+export type ChatCategory = {
   id: string;
   label: string;
   icon: string;
   description: string;
 };
 
-const categories: ChatCategory[] = [
-  { id: 'demo', label: 'Book a Demo', icon: '[Demo]', description: 'See MenuCapture in action' },
-  { id: 'pricing', label: 'Pricing Question', icon: '[$]', description: 'Plans and pricing details' },
-  { id: 'feature', label: 'Feature Request', icon: '[+]', description: 'Suggest improvements' },
-  { id: 'support', label: 'Need Support', icon: '[?]', description: 'Get help with your account' },
+export interface ChatWidgetConfig {
+  /** Your brand/team name shown in the widget */
+  teamName?: string;
+  /** Short identifier shown in avatar (e.g. "MC", "AB") */
+  avatarInitials?: string;
+  /** Title shown in chat header */
+  headerTitle?: string;
+  /** Welcome message shown before categories */
+  welcomeMessage?: string;
+  /** Categories for routing conversations */
+  categories?: ChatCategory[];
+  /** localStorage key prefix for storing tokens */
+  storageKeyPrefix?: string;
+  /** Polling interval in ms (default: 5000) */
+  pollIntervalMs?: number;
+}
+
+const DEFAULT_CATEGORIES: ChatCategory[] = [
+  { id: 'general', label: 'General Question', icon: '💬', description: 'Ask us anything' },
+  { id: 'support', label: 'Need Support', icon: '🛠️', description: 'Get help with your account' },
+  { id: 'feedback', label: 'Feedback', icon: '💡', description: 'Share your thoughts' },
 ];
 
-export default function ChatWidget() {
+const DEFAULT_CONFIG: Required<ChatWidgetConfig> = {
+  teamName: 'Support Team',
+  avatarInitials: 'ST',
+  headerTitle: 'Support',
+  welcomeMessage: 'Welcome! How can we help you today?',
+  categories: DEFAULT_CATEGORIES,
+  storageKeyPrefix: 'chat-widget',
+  pollIntervalMs: 5000,
+};
+
+export default function ChatWidget(props: ChatWidgetConfig = {}) {
+  const config = { ...DEFAULT_CONFIG, ...props };
+  
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
@@ -49,6 +77,11 @@ export default function ChatWidget() {
   const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const storageKeys = {
+    token: `${config.storageKeyPrefix}-token`,
+    visitorId: `${config.storageKeyPrefix}-visitor-id`,
+  };
 
   // Initialize visitor session with server-issued token
   useEffect(() => {
@@ -94,7 +127,7 @@ export default function ChatWidget() {
       } catch (error) {
         console.error('Error polling for messages:', error);
       }
-    }, 5000); // Poll every 5 seconds
+    }, config.pollIntervalMs);
 
     return () => clearInterval(pollInterval);
   }, [isOpen, visitorToken, messages]);
@@ -102,8 +135,8 @@ export default function ChatWidget() {
   const initializeSession = async () => {
     try {
       // Check if we have a valid token in localStorage
-      const storedToken = localStorage.getItem('menucapture-chat-token');
-      const storedVisitorId = localStorage.getItem('menucapture-visitor-id');
+      const storedToken = localStorage.getItem(storageKeys.token);
+      const storedVisitorId = localStorage.getItem(storageKeys.visitorId);
 
       if (storedToken && storedVisitorId) {
         // Try to use existing token
@@ -124,8 +157,8 @@ export default function ChatWidget() {
         setVisitorId(data.visitorId);
 
         // Store token securely in localStorage
-        localStorage.setItem('menucapture-chat-token', data.token);
-        localStorage.setItem('menucapture-visitor-id', data.visitorId);
+        localStorage.setItem(storageKeys.token, data.token);
+        localStorage.setItem(storageKeys.visitorId, data.visitorId);
 
         // Load any existing messages
         await loadMessages(data.token);
@@ -152,8 +185,8 @@ export default function ChatWidget() {
 
       if (response.status === 401) {
         // Token invalid or expired - create new session
-        localStorage.removeItem('menucapture-chat-token');
-        localStorage.removeItem('menucapture-visitor-id');
+        localStorage.removeItem(storageKeys.token);
+        localStorage.removeItem(storageKeys.visitorId);
         await initializeSession();
         return;
       }
@@ -233,8 +266,8 @@ export default function ChatWidget() {
       if (response.status === 401) {
         // Token invalid - reinitialize session
         setError('Session expired. Refreshing...');
-        localStorage.removeItem('menucapture-chat-token');
-        localStorage.removeItem('menucapture-visitor-id');
+        localStorage.removeItem(storageKeys.token);
+        localStorage.removeItem(storageKeys.visitorId);
         await initializeSession();
         return;
       }
@@ -280,7 +313,7 @@ export default function ChatWidget() {
           {/* Message Button */}
           <div className="bg-white rounded-full shadow-lg px-4 py-2 flex items-center gap-2">
             <div className="text-right">
-              <div className="text-sm font-semibold text-gray-900">MenuCapture Team</div>
+              <div className="text-sm font-semibold text-gray-900">{config.teamName}</div>
               <div className="text-xs text-gray-500 flex items-center justify-end gap-1">
                 <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`} />
                 {isOnline ? 'Online now' : 'Leave a message'}
@@ -304,7 +337,7 @@ export default function ChatWidget() {
           >
             <div className="relative">
               <div className="w-14 h-14 rounded-full shadow-lg bg-gradient-to-br from-gray-700 to-gray-900 flex items-center justify-center text-white font-bold text-xl border-2 border-white">
-                MC
+                {config.avatarInitials}
               </div>
 
               {/* Online Status Indicator */}
@@ -328,10 +361,10 @@ export default function ChatWidget() {
           <div className="bg-gray-900 text-white p-4 rounded-t-2xl flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center font-bold">
-                MC
+                {config.avatarInitials}
               </div>
               <div>
-                <div className="font-semibold">MenuCapture Support</div>
+                <div className="font-semibold">{config.headerTitle}</div>
                 <div className="text-xs opacity-90 flex items-center gap-1">
                   <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-400' : 'bg-gray-400'}`} />
                   {isOnline ? "We are online" : "Leave a message"}
@@ -359,13 +392,10 @@ export default function ChatWidget() {
             {messages.length === 0 && showCategories ? (
               <div className="py-4">
                 <p className="text-gray-700 text-center mb-4 font-medium">
-                  Welcome to MenuCapture!
-                </p>
-                <p className="text-gray-500 text-center text-sm mb-6">
-                  How can we help you today?
+                  {config.welcomeMessage}
                 </p>
                 <div className="space-y-2">
-                  {categories.map((category) => (
+                  {config.categories.map((category) => (
                     <button
                       key={category.id}
                       onClick={() => handleCategorySelect(category.id)}
