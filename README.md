@@ -38,23 +38,16 @@ That's it. Works with any backend: Express, Fastify, Hono, Django, Rails, Go, Ru
 chat-widget-oss/
 ├── packages/
 │   └── widget/               # Frontend widget (vanilla JS)
-│       ├── src/
+│       ├── src/              # TypeScript source
 │       └── dist/
 │           ├── chat-widget.umd.js    # For <script> tags
 │           ├── chat-widget.es.js     # For ES modules
 │           └── *.d.ts                # TypeScript types
 │
-├── components/
-│   └── ChatWidget.tsx        # React component (for Next.js users)
-├── lib/
-│   └── chat-security.ts      # Token signing & rate limiting
-├── app/api/chat/             # Next.js API routes (reference impl)
-│   ├── init/route.ts
-│   ├── messages/route.ts
-│   ├── send/route.ts
-│   └── status/route.ts
-│
 └── examples/
+    ├── express/              # Complete Express.js backend
+    │   ├── server.js         # All endpoints + SQLite
+    │   └── public/           # Demo page
     └── vanilla-html/         # Plain HTML demo
 ```
 
@@ -148,10 +141,11 @@ Check if support is online.
 
 ## Backend Implementation
 
-See `lib/chat-security.ts` for the reference implementation of:
+See `examples/express/server.js` for a complete reference implementation including:
 - Token generation with HMAC signatures
 - Fingerprint verification (IP + User-Agent)
 - Rate limiting
+- SQLite database
 
 You can port this logic to any language/framework.
 
@@ -237,6 +231,20 @@ The widget uses CSS classes prefixed with `.chat-widget-`. Override them in your
   background: linear-gradient(135deg, #3b82f6, #1d4ed8) !important;
 }
 ```
+
+## TODO
+
+### High Priority
+- [ ] **Email capture** — Let visitors enter their email before chatting so you can follow up
+- [ ] **Fix auto-response** — Only show "we'll get back to you" on the first message, not subsequent ones
+- [ ] **Telegram replies** — Make replies sent via Telegram actually appear in the chat widget (currently broken)
+
+### Nice to Have
+- [ ] Extract Telegram notification as optional plugin
+- [ ] Add proper TypeScript interfaces for db helpers
+- [ ] Publish to npm as `@chat-widget/embed`
+- [ ] Add WebSocket option for real-time (instead of polling)
+- [ ] Add theming/styling options (colors, fonts, positioning)
 
 ## Security Notes
 
