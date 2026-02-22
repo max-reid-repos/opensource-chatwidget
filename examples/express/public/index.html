@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chat Widget - Express Demo</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 40px 20px;
+      background: #f9fafb;
+      color: #111827;
+    }
+    h1 { margin-bottom: 8px; }
+    .subtitle { color: #6b7280; margin-bottom: 32px; }
+    .card {
+      background: white;
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 24px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    h2 { margin-top: 0; font-size: 18px; }
+    pre {
+      background: #1f2937;
+      color: #f9fafb;
+      padding: 16px;
+      border-radius: 8px;
+      overflow-x: auto;
+      font-size: 13px;
+    }
+    code {
+      background: #e5e7eb;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+    .buttons { display: flex; gap: 8px; margin-top: 16px; }
+    button {
+      background: #111827;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background 0.2s;
+    }
+    button:hover { background: #374151; }
+    button.secondary {
+      background: white;
+      color: #111827;
+      border: 1px solid #d1d5db;
+    }
+    button.secondary:hover { background: #f3f4f6; }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px;
+      background: #d1fae5;
+      color: #065f46;
+      border-radius: 9999px;
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .status::before {
+      content: '';
+      width: 8px;
+      height: 8px;
+      background: #10b981;
+      border-radius: 50%;
+    }
+  </style>
+</head>
+<body>
+  <h1>Chat Widget Demo 💬</h1>
+  <p class="subtitle">Stack-agnostic chat widget running on Express.js</p>
+
+  <div class="card">
+    <h2>Status</h2>
+    <p><span class="status">Backend running</span></p>
+    <p style="color: #6b7280; font-size: 14px;">
+      The chat widget is in the bottom-right corner. Click it to start chatting!
+    </p>
+    <div class="buttons">
+      <button onclick="ChatWidget.open()">Open Chat</button>
+      <button class="secondary" onclick="ChatWidget.close()">Close Chat</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>How It Works</h2>
+    <p>This demo includes:</p>
+    <ul>
+      <li><strong>Frontend:</strong> <code>chat-widget.umd.js</code> (20KB, zero dependencies)</li>
+      <li><strong>Backend:</strong> Express.js with SQLite storage</li>
+      <li><strong>Security:</strong> HMAC-signed tokens, rate limiting, fingerprinting</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>Integration Code</h2>
+    <pre>&lt;script src="chat-widget.umd.js"&gt;&lt;/script&gt;
+&lt;script&gt;
+  ChatWidget.init({
+    apiUrl: '/api/chat',
+    teamName: 'My Support',
+    avatarInitials: 'MS',
+    categories: [
+      { id: 'sales', label: 'Sales', icon: '💰', description: 'Pricing' },
+      { id: 'support', label: 'Support', icon: '🛠️', description: 'Get help' },
+    ]
+  });
+&lt;/script&gt;</pre>
+  </div>
+
+  <div class="card">
+    <h2>Admin Endpoints</h2>
+    <p>For testing, the backend exposes admin endpoints:</p>
+    <ul>
+      <li><code>GET /api/admin/conversations</code> — List all chats</li>
+      <li><code>POST /api/admin/reply</code> — Send admin reply</li>
+    </ul>
+    <pre>curl http://localhost:3000/api/admin/conversations</pre>
+  </div>
+
+  <!-- Load the widget -->
+  <script src="chat-widget.umd.js"></script>
+  <script>
+    ChatWidget.init({
+      apiUrl: '/api/chat',
+      teamName: 'Express Demo',
+      avatarInitials: 'ED',
+      headerTitle: 'Express Demo',
+      welcomeMessage: 'Welcome! This is a fully working demo. Try sending a message!',
+      categories: [
+        { id: 'test', label: 'Just Testing', icon: '🧪', description: 'Try the widget' },
+        { id: 'question', label: 'Question', icon: '❓', description: 'Ask something' },
+        { id: 'feedback', label: 'Feedback', icon: '💡', description: 'Share thoughts' },
+      ]
+    });
+  </script>
+</body>
+</html>

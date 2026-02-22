@@ -1,0 +1,7 @@
+node_modules/
+# Keep widget dist for distribution
+!packages/widget/dist/
+*.db
+*.db-wal
+*.db-shm
+.DS_Store
