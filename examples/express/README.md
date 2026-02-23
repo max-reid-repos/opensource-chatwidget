@@ -26,8 +26,15 @@ Open http://localhost:3000 in your browser.
 |--------|----------|-------------|
 | POST | `/api/chat/init` | Create visitor session |
 | GET | `/api/chat/messages?token=...` | Get messages |
+| POST | `/api/chat/email` | Save visitor email |
 | POST | `/api/chat/send` | Send message |
 | GET | `/api/chat/status` | Check online status |
+
+### Optional Telegram Endpoint
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/telegram/webhook` | Ingest Telegram admin replies into chat |
 
 ### Admin Endpoints
 
@@ -48,10 +55,23 @@ curl -X POST http://localhost:3000/api/admin/reply \
   -d '{"visitorId": "visitor_abc123...", "text": "Hello from admin!"}'
 ```
 
+## Telegram Reply Flow (Optional)
+
+When Telegram env vars are configured, visitor messages are forwarded to Telegram.
+Admins can reply in either of these ways:
+
+- Reply directly to the visitor message in Telegram.
+- Use `/reply visitor_xxx your message` in Telegram.
+
+The webhook endpoint stores that reply as an admin chat message, so it appears in the widget.
+
 ## Environment Variables
 
 - `PORT` — Server port (default: 3000)
 - `CHAT_TOKEN_SECRET` — Secret for signing tokens (auto-generated if not set)
+- `TELEGRAM_BOT_TOKEN` — Optional bot token for outgoing notifications
+- `TELEGRAM_CHAT_ID` — Optional target chat id for outgoing notifications
+- `TELEGRAM_WEBHOOK_SECRET` — Optional secret for validating Telegram webhook requests
 
 ## Integrating with Your App
 

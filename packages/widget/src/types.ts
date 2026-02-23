@@ -9,8 +9,9 @@ export interface ChatMessage {
   id: string;
   text: string;
   sender: 'visitor' | 'admin';
-  timestamp: Date;
+  timestamp: Date | string;
   category?: string;
+  sent_via_telegram?: boolean;
 }
 
 export interface ChatWidgetConfig {
@@ -26,6 +27,8 @@ export interface ChatWidgetConfig {
   welcomeMessage?: string;
   /** Categories for routing conversations */
   categories?: ChatCategory[];
+  /** Require visitor email before first message */
+  requireEmail?: boolean;
   /** localStorage key prefix for storing tokens */
   storageKeyPrefix?: string;
   /** Polling interval in ms (default: 5000) */
@@ -64,6 +67,11 @@ export interface SendResponse {
   messageId: string;
   autoResponse?: string;
   timestamp: string;
+}
+
+export interface EmailResponse {
+  success: boolean;
+  email: string;
 }
 
 export interface StatusResponse {

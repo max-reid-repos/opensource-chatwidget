@@ -1,5 +1,5 @@
 import type { ChatWidgetConfig, ChatMessage, ChatCategory } from './types';
-import type { Store, WidgetState } from './state';
+import type { WidgetState } from './state';
 import { icons } from './icons';
 
 const DEFAULT_CATEGORIES: ChatCategory[] = [
@@ -11,6 +11,7 @@ const DEFAULT_CATEGORIES: ChatCategory[] = [
 export interface UICallbacks {
   onToggle: () => void;
   onCategorySelect: (categoryId: string) => void;
+  onEmailSubmit: (email: string) => void;
   onSendMessage: (text: string) => void;
 }
 
@@ -32,6 +33,7 @@ export class WidgetUI {
       headerTitle: config.headerTitle ?? 'Support',
       welcomeMessage: config.welcomeMessage ?? 'Welcome! How can we help you today?',
       categories: config.categories ?? DEFAULT_CATEGORIES,
+      requireEmail: config.requireEmail ?? true,
       storageKeyPrefix: config.storageKeyPrefix ?? 'chat-widget',
       pollIntervalMs: config.pollIntervalMs ?? 5000,
       position: config.position ?? 'bottom-right',
@@ -126,14 +128,16 @@ export class WidgetUI {
             <button 
               type="submit" 
               class="chat-widget-send-btn"
-              ${state.isLoading || state.error ? 'disabled' : ''}
+              ${this.isInputDisabled(state) || state.isLoading || state.error ? 'disabled' : ''}
             >
               ${icons.send}
             </button>
           </div>
           <div class="chat-widget-input-hint">
-            ${state.selectedCategory 
-              ? 'Typically replies within a few hours' 
+            ${state.selectedCategory
+              ? state.showEmailStep && !state.emailSubmitted && state.messages.length === 0
+                ? 'Enter your email to continue'
+                : 'Typically replies within a few hours'
               : 'Please select a topic to start chatting'}
           </div>
         </form>
@@ -169,6 +173,11 @@ export class WidgetUI {
       `;
     }
 
+    // Show email capture step before first message (when enabled)
+    if (state.messages.length === 0 && state.showEmailStep && !state.emailSubmitted) {
+      return this.renderEmailCapture();
+    }
+
     // Show empty state if no messages and category selected
     if (state.messages.length === 0) {
       return `
@@ -199,14 +208,45 @@ export class WidgetUI {
     `;
   }
 
+  private renderEmailCapture(): string {
+    return `
+      <div class="chat-widget-email-step">
+        <div class="chat-widget-email-icon">${icons.mail}</div>
+        <div class="chat-widget-email-title">Before we start</div>
+        <div class="chat-widget-email-text">
+          Enter your email so we can follow up with you.
+        </div>
+        <form class="chat-widget-email-form" data-action="email">
+          <input
+            type="email"
+            class="chat-widget-email-input"
+            data-ref="email-input"
+            placeholder="you@example.com"
+            maxlength="254"
+            required
+          >
+          <button type="submit" class="chat-widget-email-submit">
+            Continue
+          </button>
+        </form>
+      </div>
+    `;
+  }
+
+  private isEmailValid(email: string): boolean {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  }
+
   private getInputPlaceholder(state: WidgetState): string {
     if (!state.selectedCategory) return 'Select a topic first...';
+    if (state.showEmailStep && !state.emailSubmitted && state.messages.length === 0) return 'Enter email first...';
     return state.isOnline ? 'Type your message...' : 'Leave a message...';
   }
 
   private isInputDisabled(state: WidgetState): boolean {
     return state.isLoading || 
            (!state.selectedCategory && state.messages.length === 0) || 
+           (state.showEmailStep && !state.emailSubmitted && state.messages.length === 0) ||
            !!state.error;
   }
 
@@ -233,6 +273,19 @@ export class WidgetUI {
         if (input && input.value.trim()) {
           this.callbacks.onSendMessage(input.value.trim());
           input.value = '';
+        }
+      });
+    }
+
+    // Email capture form
+    const emailForm = this.container.querySelector('[data-action="email"]');
+    if (emailForm) {
+      emailForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const input = this.container.querySelector('[data-ref="email-input"]') as HTMLInputElement | null;
+        const normalizedEmail = input?.value.trim().toLowerCase() ?? '';
+        if (normalizedEmail && this.isEmailValid(normalizedEmail)) {
+          this.callbacks.onEmailSubmit(normalizedEmail);
         }
       });
     }

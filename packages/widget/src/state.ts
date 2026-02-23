@@ -7,6 +7,8 @@ export interface WidgetState {
   messages: ChatMessage[];
   selectedCategory: string | null;
   showCategories: boolean;
+  showEmailStep: boolean;
+  emailSubmitted: boolean;
   error: string | null;
   unreadCount: number;
   session: SessionData | null;
@@ -42,6 +44,8 @@ export const initialState: WidgetState = {
   messages: [],
   selectedCategory: null,
   showCategories: true,
+  showEmailStep: false,
+  emailSubmitted: false,
   error: null,
   unreadCount: 0,
   session: null,

@@ -12,6 +12,10 @@ export declare class ChatWidget {
     private clearSession;
     private toggle;
     private selectCategory;
+    private normalizeEmail;
+    private isValidEmail;
+    private syncEmailToSession;
+    private submitEmail;
     private sendMessage;
     private startPolling;
     private stopPolling;

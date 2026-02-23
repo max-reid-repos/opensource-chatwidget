@@ -287,6 +287,69 @@ export const styles = `
   color: #6b7280;
 }
 
+/* Email Capture Step */
+.chat-widget-email-step {
+  padding: 16px 0;
+}
+
+.chat-widget-email-icon {
+  width: 40px;
+  height: 40px;
+  color: #d1d5db;
+  margin: 0 auto 12px;
+}
+
+.chat-widget-email-title {
+  text-align: center;
+  color: #374151;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.chat-widget-email-text {
+  text-align: center;
+  color: #6b7280;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.chat-widget-email-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chat-widget-email-input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.chat-widget-email-input:focus {
+  border-color: #6b7280;
+}
+
+.chat-widget-email-submit {
+  width: 100%;
+  background: #111827;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.chat-widget-email-submit:hover {
+  background: #1f2937;
+}
+
 /* Empty State */
 .chat-widget-empty {
   text-align: center;

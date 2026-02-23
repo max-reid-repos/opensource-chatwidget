@@ -1,4 +1,4 @@
-class h {
+class f {
   constructor(e) {
     this.baseUrl = e, this.baseUrl = e.replace(/\/$/, "");
   }
@@ -42,12 +42,18 @@ class h {
       body: JSON.stringify({ token: e, text: t, category: i })
     });
   }
+  async saveEmail(e, t) {
+    return this.request("/email", {
+      method: "POST",
+      body: JSON.stringify({ token: e, email: t })
+    });
+  }
   async getStatus() {
     return this.request("/status");
   }
 }
-function p(o) {
-  let e = { ...o };
+function b(l) {
+  let e = { ...l };
   const t = /* @__PURE__ */ new Set();
   return {
     getState: () => e,
@@ -57,26 +63,29 @@ function p(o) {
     subscribe: (i) => (t.add(i), () => t.delete(i))
   };
 }
-const u = {
+const x = {
   isOpen: !1,
   isOnline: !0,
   isLoading: !1,
   messages: [],
   selectedCategory: null,
   showCategories: !0,
+  showEmailStep: !1,
+  emailSubmitted: !1,
   error: null,
   unreadCount: 0,
   session: null
-}, c = {
+}, d = {
   messageCircle: '<svg class="chat-widget-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>',
   send: '<svg class="chat-widget-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>',
+  mail: '<svg class="chat-widget-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>',
   x: '<svg class="chat-widget-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>'
-}, w = [
+}, y = [
   { id: "general", label: "General Question", icon: "💬", description: "Ask us anything" },
   { id: "support", label: "Support", icon: "🛠️", description: "Get help with your account" },
   { id: "feedback", label: "Feedback", icon: "💡", description: "Share your thoughts" }
 ];
-class b {
+class v {
   constructor(e, t) {
     this.inputRef = null, this.messagesRef = null, this.config = {
       apiUrl: e.apiUrl,
@@ -84,7 +93,8 @@ class b {
       avatarInitials: e.avatarInitials ?? "ST",
       headerTitle: e.headerTitle ?? "Support",
       welcomeMessage: e.welcomeMessage ?? "Welcome! How can we help you today?",
-      categories: e.categories ?? w,
+      categories: e.categories ?? y,
+      requireEmail: e.requireEmail ?? !0,
       storageKeyPrefix: e.storageKeyPrefix ?? "chat-widget",
       pollIntervalMs: e.pollIntervalMs ?? 5e3,
       position: e.position ?? "bottom-right",
@@ -112,7 +122,7 @@ class b {
             </div>
           </div>
           <button class="chat-widget-chat-btn" data-action="toggle">
-            ${c.messageCircle}
+            ${d.messageCircle}
             Chat
           </button>
         </div>
@@ -139,7 +149,7 @@ class b {
               </div>
             </div>
           </div>
-          <button class="chat-widget-close-btn" data-action="toggle">${c.x}</button>
+          <button class="chat-widget-close-btn" data-action="toggle">${d.x}</button>
         </div>
         
         ${e.error ? `<div class="chat-widget-error">${this.escape(e.error)}</div>` : ""}
@@ -161,13 +171,13 @@ class b {
             <button 
               type="submit" 
               class="chat-widget-send-btn"
-              ${e.isLoading || e.error ? "disabled" : ""}
+              ${this.isInputDisabled(e) || e.isLoading || e.error ? "disabled" : ""}
             >
-              ${c.send}
+              ${d.send}
             </button>
           </div>
           <div class="chat-widget-input-hint">
-            ${e.selectedCategory ? "Typically replies within a few hours" : "Please select a topic to start chatting"}
+            ${e.selectedCategory ? e.showEmailStep && !e.emailSubmitted && e.messages.length === 0 ? "Enter your email to continue" : "Typically replies within a few hours" : "Please select a topic to start chatting"}
           </div>
         </form>
       </div>
@@ -189,9 +199,9 @@ class b {
             `).join("")}
           </div>
         </div>
-      ` : e.messages.length === 0 ? `
+      ` : e.messages.length === 0 && e.showEmailStep && !e.emailSubmitted ? this.renderEmailCapture() : e.messages.length === 0 ? `
         <div class="chat-widget-empty">
-          <div class="chat-widget-empty-icon">${c.messageCircle}</div>
+          <div class="chat-widget-empty-icon">${d.messageCircle}</div>
           <div>Start typing your message below...</div>
         </div>
       ` : e.messages.map((t) => this.renderMessage(t)).join("");
@@ -210,26 +220,59 @@ class b {
       </div>
     `;
   }
+  renderEmailCapture() {
+    return `
+      <div class="chat-widget-email-step">
+        <div class="chat-widget-email-icon">${d.mail}</div>
+        <div class="chat-widget-email-title">Before we start</div>
+        <div class="chat-widget-email-text">
+          Enter your email so we can follow up with you.
+        </div>
+        <form class="chat-widget-email-form" data-action="email">
+          <input
+            type="email"
+            class="chat-widget-email-input"
+            data-ref="email-input"
+            placeholder="you@example.com"
+            maxlength="254"
+            required
+          >
+          <button type="submit" class="chat-widget-email-submit">
+            Continue
+          </button>
+        </form>
+      </div>
+    `;
+  }
+  isEmailValid(e) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
+  }
   getInputPlaceholder(e) {
-    return e.selectedCategory ? e.isOnline ? "Type your message..." : "Leave a message..." : "Select a topic first...";
+    return e.selectedCategory ? e.showEmailStep && !e.emailSubmitted && e.messages.length === 0 ? "Enter email first..." : e.isOnline ? "Type your message..." : "Leave a message..." : "Select a topic first...";
   }
   isInputDisabled(e) {
-    return e.isLoading || !e.selectedCategory && e.messages.length === 0 || !!e.error;
+    return e.isLoading || !e.selectedCategory && e.messages.length === 0 || e.showEmailStep && !e.emailSubmitted && e.messages.length === 0 || !!e.error;
   }
   bindEvents() {
-    this.container.querySelectorAll('[data-action="toggle"]').forEach((t) => {
-      t.addEventListener("click", () => this.callbacks.onToggle());
-    }), this.container.querySelectorAll('[data-action="category"]').forEach((t) => {
-      t.addEventListener("click", () => {
-        const i = t.dataset.category;
-        i && this.callbacks.onCategorySelect(i);
+    this.container.querySelectorAll('[data-action="toggle"]').forEach((i) => {
+      i.addEventListener("click", () => this.callbacks.onToggle());
+    }), this.container.querySelectorAll('[data-action="category"]').forEach((i) => {
+      i.addEventListener("click", () => {
+        const s = i.dataset.category;
+        s && this.callbacks.onCategorySelect(s);
       });
     });
     const e = this.container.querySelector('[data-action="send"]');
-    e && e.addEventListener("submit", (t) => {
-      t.preventDefault();
-      const i = this.inputRef;
-      i && i.value.trim() && (this.callbacks.onSendMessage(i.value.trim()), i.value = "");
+    e && e.addEventListener("submit", (i) => {
+      i.preventDefault();
+      const s = this.inputRef;
+      s && s.value.trim() && (this.callbacks.onSendMessage(s.value.trim()), s.value = "");
+    });
+    const t = this.container.querySelector('[data-action="email"]');
+    t && t.addEventListener("submit", (i) => {
+      i.preventDefault();
+      const s = this.container.querySelector('[data-ref="email-input"]'), o = (s == null ? void 0 : s.value.trim().toLowerCase()) ?? "";
+      o && this.isEmailValid(o) && this.callbacks.onEmailSubmit(o);
     });
   }
   scrollToBottom() {
@@ -246,7 +289,7 @@ class b {
     this.container.remove();
   }
 }
-const f = `
+const S = `
 .chat-widget-container {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   font-size: 14px;
@@ -532,6 +575,69 @@ const f = `
   color: #6b7280;
 }
 
+/* Email Capture Step */
+.chat-widget-email-step {
+  padding: 16px 0;
+}
+
+.chat-widget-email-icon {
+  width: 40px;
+  height: 40px;
+  color: #d1d5db;
+  margin: 0 auto 12px;
+}
+
+.chat-widget-email-title {
+  text-align: center;
+  color: #374151;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.chat-widget-email-text {
+  text-align: center;
+  color: #6b7280;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.chat-widget-email-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chat-widget-email-input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.chat-widget-email-input:focus {
+  border-color: #6b7280;
+}
+
+.chat-widget-email-submit {
+  width: 100%;
+  background: #111827;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.chat-widget-email-submit:hover {
+  background: #1f2937;
+}
+
 /* Empty State */
 .chat-widget-empty {
   text-align: center;
@@ -655,56 +761,68 @@ const f = `
   height: 20px;
 }
 `;
-function x() {
+function k() {
   if (document.getElementById("chat-widget-styles")) return;
-  const o = document.createElement("style");
-  o.id = "chat-widget-styles", o.textContent = f, document.head.appendChild(o);
+  const l = document.createElement("style");
+  l.id = "chat-widget-styles", l.textContent = S, document.head.appendChild(l);
 }
-const m = "data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuBzvLZiTYIG2m98OScTgwOUafi";
-class g {
+const E = "data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuBzvLZiTYIG2m98OScTgwOUafi", I = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+class w {
   constructor(e) {
     if (this.pollInterval = null, !e.apiUrl)
       throw new Error("ChatWidget: apiUrl is required");
-    this.config = e, this.api = new h(e.apiUrl), this.store = p(u), x(), this.ui = new b(e, {
+    this.config = e, this.api = new f(e.apiUrl), this.store = b(x), k(), this.ui = new v(e, {
       onToggle: () => this.toggle(),
       onCategorySelect: (t) => this.selectCategory(t),
+      onEmailSubmit: (t) => this.submitEmail(t),
       onSendMessage: (t) => this.sendMessage(t)
     }), this.store.subscribe((t) => {
       this.ui.render(t);
     }), this.ui.render(this.store.getState()), this.initSession();
   }
   async initSession() {
-    const e = this.config.storageKeyPrefix ?? "chat-widget", t = `${e}-token`, i = `${e}-visitor-id`;
+    const e = this.config.storageKeyPrefix ?? "chat-widget", t = `${e}-token`, i = `${e}-visitor-id`, s = `${e}-email`, o = `${e}-email-visitor-id`;
     try {
-      const s = localStorage.getItem(t), d = localStorage.getItem(i);
-      if (s && d) {
+      const r = localStorage.getItem(s) ?? "", a = this.normalizeEmail(r), g = this.isValidEmail(a);
+      g ? (this.store.setState({ emailSubmitted: !0 }), r !== a && localStorage.setItem(s, a)) : (localStorage.removeItem(s), localStorage.removeItem(o), this.store.setState({ emailSubmitted: !1 }));
+      const h = localStorage.getItem(t), c = localStorage.getItem(i);
+      if (h && c) {
         this.store.setState({
-          session: { token: s, visitorId: d }
-        }), await this.loadMessages();
+          session: { token: h, visitorId: c }
+        }), await this.loadMessages(), g && localStorage.getItem(o) !== c && await this.syncEmailToSession(h, c, a);
         return;
       }
-      const r = await this.api.init();
-      if (r.ok && r.data) {
-        const { token: n, visitorId: l } = r.data;
-        localStorage.setItem(t, n), localStorage.setItem(i, l), this.store.setState({
-          session: { token: n, visitorId: l }
-        });
+      const u = await this.api.init();
+      if (u.ok && u.data) {
+        const { token: p, visitorId: m } = u.data;
+        localStorage.setItem(t, p), localStorage.setItem(i, m), this.store.setState({
+          session: { token: p, visitorId: m }
+        }), g && await this.syncEmailToSession(p, m, a);
       } else
         this.store.setState({
           error: "Failed to initialize chat. Please refresh the page."
         });
-    } catch (s) {
-      console.error("[ChatWidget] Init error:", s), this.store.setState({
+    } catch (r) {
+      console.error("[ChatWidget] Init error:", r), this.store.setState({
         error: "Failed to initialize chat. Please refresh the page."
       });
+    } finally {
+      this.checkOnlineStatus();
     }
-    this.checkOnlineStatus();
   }
   async loadMessages() {
+    var i;
     const { session: e } = this.store.getState();
     if (!e) return;
     const t = await this.api.getMessages(e.token);
-    t.ok && t.data ? this.store.setState({ messages: t.data.messages || [] }) : t.status === 401 ? (this.clearSession(), await this.initSession()) : t.status === 429 && this.store.setState({ error: "Too many requests. Please wait." });
+    if (t.ok && t.data) {
+      const s = t.data.messages || [], r = this.store.getState().selectedCategory || ((i = s[0]) == null ? void 0 : i.category) || null;
+      this.store.setState({
+        messages: s,
+        selectedCategory: r,
+        showCategories: s.length === 0 && !r
+      });
+    } else t.status === 401 ? (this.clearSession(), await this.initSession()) : t.status === 429 && this.store.setState({ error: "Too many requests. Please wait." });
   }
   async checkOnlineStatus() {
     const e = await this.api.getStatus();
@@ -719,18 +837,62 @@ class g {
     e ? (this.store.setState({ isOpen: !1 }), this.stopPolling()) : (this.store.setState({ isOpen: !0, unreadCount: 0, error: null }), this.startPolling());
   }
   selectCategory(e) {
+    const t = this.config.requireEmail ?? !0, { emailSubmitted: i, messages: s } = this.store.getState();
     this.store.setState({
       selectedCategory: e,
-      showCategories: !1
+      showCategories: !1,
+      showEmailStep: t && !i && s.length === 0,
+      error: null
+    });
+  }
+  normalizeEmail(e) {
+    return e.trim().toLowerCase();
+  }
+  isValidEmail(e) {
+    return I.test(e);
+  }
+  async syncEmailToSession(e, t, i, s = !1) {
+    const o = this.normalizeEmail(i);
+    if (!this.isValidEmail(o))
+      return s && this.store.setState({ error: "Please enter a valid email address." }), !1;
+    const r = await this.api.saveEmail(e, o);
+    if (!r.ok)
+      return s && this.store.setState({
+        error: r.error || "Failed to save email. Please try again."
+      }), !1;
+    const a = this.config.storageKeyPrefix ?? "chat-widget";
+    return localStorage.setItem(`${a}-email`, o), localStorage.setItem(`${a}-email-visitor-id`, t), !0;
+  }
+  async submitEmail(e) {
+    const { session: t } = this.store.getState();
+    if (!t) {
+      this.store.setState({ error: "Session not initialized. Please refresh the page." });
+      return;
+    }
+    this.store.setState({ error: null }), await this.syncEmailToSession(t.token, t.visitorId, e, !0) && this.store.setState({
+      emailSubmitted: !0,
+      showEmailStep: !1,
+      error: null
     });
   }
   async sendMessage(e) {
     const t = this.store.getState();
-    if (!t.session || !t.selectedCategory) {
+    if (!t.session) {
+      this.store.setState({ error: "Session not initialized. Please refresh the page." });
+      return;
+    }
+    if (!t.selectedCategory) {
       this.store.setState({ showCategories: !0 });
       return;
     }
-    const i = {
+    const i = this.config.requireEmail ?? !0;
+    if (i && !t.emailSubmitted && t.messages.length === 0) {
+      this.store.setState({ showEmailStep: !0, error: null });
+      return;
+    }
+    const s = this.config.storageKeyPrefix ?? "chat-widget", o = this.normalizeEmail(localStorage.getItem(`${s}-email`) ?? "");
+    i && t.emailSubmitted && this.isValidEmail(o) && localStorage.getItem(`${s}-email-visitor-id`) !== t.session.visitorId && await this.syncEmailToSession(t.session.token, t.session.visitorId, o);
+    const r = {
       id: Date.now().toString(),
       text: e,
       sender: "visitor",
@@ -738,19 +900,19 @@ class g {
       category: t.selectedCategory
     };
     this.store.setState({
-      messages: [...t.messages, i],
+      messages: [...t.messages, r],
       isLoading: !0,
       error: null
     });
-    const s = await this.api.send(
+    const a = await this.api.send(
       t.session.token,
       e,
       t.selectedCategory
     );
-    s.ok ? await this.loadMessages() : s.status === 401 ? (this.store.setState({ error: "Session expired. Refreshing..." }), this.clearSession(), await this.initSession()) : s.status === 429 ? this.store.setState({
+    a.ok ? await this.loadMessages() : a.status === 401 ? (this.store.setState({ error: "Session expired. Refreshing..." }), this.clearSession(), await this.initSession()) : a.status === 429 ? this.store.setState({
       error: "Please wait before sending more messages."
     }) : this.store.setState({
-      error: s.error || "Failed to send message"
+      error: a.error || "Failed to send message"
     }), this.store.setState({ isLoading: !1 });
   }
   startPolling() {
@@ -761,8 +923,8 @@ class g {
       if (!t.isOpen || !t.session) return;
       const i = await this.api.getMessages(t.session.token);
       if (i.ok && i.data) {
-        const s = i.data.messages || [], d = new Set(t.messages.map((n) => n.id)), r = s.filter((n) => !d.has(n.id));
-        r.length > 0 && (this.store.setState({ messages: s }), r.some((n) => n.sender === "admin") && this.playNotificationSound());
+        const s = i.data.messages || [], o = new Set(t.messages.map((a) => a.id)), r = s.filter((a) => !o.has(a.id));
+        r.length > 0 && (this.store.setState({ messages: s }), r.some((a) => a.sender === "admin") && this.playNotificationSound());
       }
     }, e);
   }
@@ -771,7 +933,7 @@ class g {
   }
   playNotificationSound() {
     try {
-      new Audio(m).play().catch(() => {
+      new Audio(E).play().catch(() => {
       });
     } catch {
     }
@@ -787,31 +949,31 @@ class g {
     this.stopPolling(), this.ui.destroy();
   }
 }
-let a = null;
-function y(o) {
-  return a ? (console.warn("[ChatWidget] Already initialized. Call destroy() first to reinitialize."), a) : (a = new g(o), a);
+let n = null;
+function C(l) {
+  return n ? (console.warn("[ChatWidget] Already initialized. Call destroy() first to reinitialize."), n) : (n = new w(l), n);
 }
-function v() {
-  a && (a.destroy(), a = null);
+function $() {
+  n && (n.destroy(), n = null);
 }
-function S() {
-  a == null || a.open();
+function z() {
+  n == null || n.open();
 }
-function k() {
-  a == null || a.close();
+function A() {
+  n == null || n.close();
 }
 typeof window < "u" && (window.ChatWidget = {
-  init: y,
-  destroy: v,
-  open: S,
-  close: k,
-  ChatWidget: g
+  init: C,
+  destroy: $,
+  open: z,
+  close: A,
+  ChatWidget: w
 });
 export {
-  g as ChatWidget,
-  k as close,
-  v as destroy,
-  y as init,
-  S as open
+  w as ChatWidget,
+  A as close,
+  $ as destroy,
+  C as init,
+  z as open
 };
 //# sourceMappingURL=chat-widget.es.js.map

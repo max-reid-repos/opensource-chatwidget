@@ -6,6 +6,8 @@ export interface WidgetState {
     messages: ChatMessage[];
     selectedCategory: string | null;
     showCategories: boolean;
+    showEmailStep: boolean;
+    emailSubmitted: boolean;
     error: string | null;
     unreadCount: number;
     session: SessionData | null;
@@ -19,6 +21,8 @@ export declare function createStore(initial: WidgetState): {
         messages: ChatMessage[];
         selectedCategory: string | null;
         showCategories: boolean;
+        showEmailStep: boolean;
+        emailSubmitted: boolean;
         error: string | null;
         unreadCount: number;
         session: SessionData | null;

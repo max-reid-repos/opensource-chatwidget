@@ -29,7 +29,8 @@ That's it. Works with any backend: Express, Fastify, Hono, Django, Rails, Go, Ru
 - 📱 **Responsive design** - Works on all screen sizes
 - 🔔 **Notification sound** - Audio alert for new admin messages
 - 🚦 **Rate limiting** - Built-in abuse protection
-- 📲 **Telegram notifications** - Optional admin alerts
+- 📧 **Email capture** - Optional email step before first message
+- 📲 **Telegram notifications + replies** - Optional admin alerts and webhook replies
 - 🎨 **Zero dependencies** - Single JS file, no React/Vue/etc required
 
 ## Project Structure
@@ -84,6 +85,7 @@ const widget = new ChatWidget({
 | `headerTitle` | string | "Support" | Title in chat header |
 | `welcomeMessage` | string | "Welcome!..." | Message shown before categories |
 | `categories` | array | default list | Category buttons to show |
+| `requireEmail` | boolean | true | Require email before first message |
 | `storageKeyPrefix` | string | "chat-widget" | localStorage key prefix |
 | `pollIntervalMs` | number | 5000 | Polling interval in ms |
 | `position` | string | "bottom-right" | "bottom-right" or "bottom-left" |
@@ -131,6 +133,17 @@ Send a message from the visitor.
 }
 ```
 
+### `POST /api/chat/email`
+Save/update the visitor email for the current session.
+
+**Body:**
+```json
+{
+  "token": "eyJhbGciOi...",
+  "email": "you@example.com"
+}
+```
+
 ### `GET /api/chat/status`
 Check if support is online.
 
@@ -138,6 +151,10 @@ Check if support is online.
 ```json
 { "online": true }
 ```
+
+### `POST /api/telegram/webhook` (Optional)
+Process admin replies from Telegram and insert them into the visitor conversation.
+If configured, verify `x-telegram-bot-api-secret-token` using `TELEGRAM_WEBHOOK_SECRET`.
 
 ## Backend Implementation
 
@@ -159,6 +176,7 @@ CREATE TABLE chat_visitor_sessions (
   ip_address TEXT NOT NULL,
   user_agent TEXT,
   fingerprint TEXT NOT NULL,
+  email TEXT,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   expires_at DATETIME NOT NULL
 );
@@ -170,6 +188,7 @@ CREATE TABLE chat_messages (
   text TEXT NOT NULL,
   sender TEXT NOT NULL CHECK (sender IN ('visitor', 'admin')),
   category TEXT,
+  sent_via_telegram INTEGER DEFAULT 0,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -235,9 +254,9 @@ The widget uses CSS classes prefixed with `.chat-widget-`. Override them in your
 ## TODO
 
 ### High Priority
-- [ ] **Email capture** — Let visitors enter their email before chatting so you can follow up
-- [ ] **Fix auto-response** — Only show "we'll get back to you" on the first message, not subsequent ones
-- [ ] **Telegram replies** — Make replies sent via Telegram actually appear in the chat widget (currently broken)
+- [x] **Email capture** — Let visitors enter their email before chatting so you can follow up
+- [x] **Fix auto-response** — Only show "we'll get back to you" on the first message, not subsequent ones
+- [x] **Telegram replies** — Make replies sent via Telegram actually appear in the chat widget
 
 ### Nice to Have
 - [ ] Extract Telegram notification as optional plugin

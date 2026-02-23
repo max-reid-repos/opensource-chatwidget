@@ -1,5 +1,6 @@
 import type { 
   ApiResponse, 
+  EmailResponse,
   InitResponse, 
   MessagesResponse, 
   SendResponse, 
@@ -67,6 +68,16 @@ export class ChatApi {
     return this.request<SendResponse>('/send', {
       method: 'POST',
       body: JSON.stringify({ token, text, category }),
+    });
+  }
+
+  async saveEmail(
+    token: string,
+    email: string
+  ): Promise<ApiResponse<EmailResponse>> {
+    return this.request<EmailResponse>('/email', {
+      method: 'POST',
+      body: JSON.stringify({ token, email }),
     });
   }
 

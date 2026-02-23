@@ -6,6 +6,7 @@ import { injectStyles } from './styles';
 
 // Notification sound (short beep, base64 encoded)
 const NOTIFICATION_SOUND = 'data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuBzvLZiTYIG2m98OScTgwOUafi';
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export class ChatWidget {
   private api: ChatApi;
@@ -30,6 +31,7 @@ export class ChatWidget {
     this.ui = new WidgetUI(config, {
       onToggle: () => this.toggle(),
       onCategorySelect: (id) => this.selectCategory(id),
+      onEmailSubmit: (email) => this.submitEmail(email),
       onSendMessage: (text) => this.sendMessage(text),
     });
 
@@ -49,8 +51,26 @@ export class ChatWidget {
     const storagePrefix = this.config.storageKeyPrefix ?? 'chat-widget';
     const tokenKey = `${storagePrefix}-token`;
     const visitorIdKey = `${storagePrefix}-visitor-id`;
+    const emailKey = `${storagePrefix}-email`;
+    const emailVisitorIdKey = `${storagePrefix}-email-visitor-id`;
 
     try {
+      // Load stored email and keep it normalized
+      const storedEmailRaw = localStorage.getItem(emailKey) ?? '';
+      const storedEmail = this.normalizeEmail(storedEmailRaw);
+      const hasValidStoredEmail = this.isValidEmail(storedEmail);
+
+      if (hasValidStoredEmail) {
+        this.store.setState({ emailSubmitted: true });
+        if (storedEmailRaw !== storedEmail) {
+          localStorage.setItem(emailKey, storedEmail);
+        }
+      } else {
+        localStorage.removeItem(emailKey);
+        localStorage.removeItem(emailVisitorIdKey);
+        this.store.setState({ emailSubmitted: false });
+      }
+
       // Check for existing session
       const storedToken = localStorage.getItem(tokenKey);
       const storedVisitorId = localStorage.getItem(visitorIdKey);
@@ -60,6 +80,14 @@ export class ChatWidget {
           session: { token: storedToken, visitorId: storedVisitorId },
         });
         await this.loadMessages();
+
+        if (
+          hasValidStoredEmail &&
+          localStorage.getItem(emailVisitorIdKey) !== storedVisitorId
+        ) {
+          await this.syncEmailToSession(storedToken, storedVisitorId, storedEmail);
+        }
+
         return;
       }
 
@@ -73,6 +101,10 @@ export class ChatWidget {
         this.store.setState({
           session: { token, visitorId },
         });
+
+        if (hasValidStoredEmail) {
+          await this.syncEmailToSession(token, visitorId, storedEmail);
+        }
       } else {
         this.store.setState({
           error: 'Failed to initialize chat. Please refresh the page.',
@@ -83,10 +115,10 @@ export class ChatWidget {
       this.store.setState({
         error: 'Failed to initialize chat. Please refresh the page.',
       });
+    } finally {
+      // Keep status indicator fresh even on early returns.
+      this.checkOnlineStatus();
     }
-
-    // Check online status
-    this.checkOnlineStatus();
   }
 
   private async loadMessages(): Promise<void> {
@@ -96,7 +128,15 @@ export class ChatWidget {
     const result = await this.api.getMessages(session.token);
 
     if (result.ok && result.data) {
-      this.store.setState({ messages: result.data.messages || [] });
+      const messages = result.data.messages || [];
+      const current = this.store.getState();
+      const inferredCategory = current.selectedCategory || messages[0]?.category || null;
+
+      this.store.setState({
+        messages,
+        selectedCategory: inferredCategory,
+        showCategories: messages.length === 0 && !inferredCategory,
+      });
     } else if (result.status === 401) {
       // Token expired, reinitialize
       this.clearSession();
@@ -135,18 +175,104 @@ export class ChatWidget {
   }
 
   private selectCategory(categoryId: string): void {
+    const requiresEmail = this.config.requireEmail ?? true;
+    const { emailSubmitted, messages } = this.store.getState();
+
     this.store.setState({
       selectedCategory: categoryId,
       showCategories: false,
+      showEmailStep: requiresEmail && !emailSubmitted && messages.length === 0,
+      error: null,
+    });
+  }
+
+  private normalizeEmail(email: string): string {
+    return email.trim().toLowerCase();
+  }
+
+  private isValidEmail(email: string): boolean {
+    return EMAIL_REGEX.test(email);
+  }
+
+  private async syncEmailToSession(
+    token: string,
+    visitorId: string,
+    email: string,
+    showError: boolean = false
+  ): Promise<boolean> {
+    const normalized = this.normalizeEmail(email);
+
+    if (!this.isValidEmail(normalized)) {
+      if (showError) {
+        this.store.setState({ error: 'Please enter a valid email address.' });
+      }
+      return false;
+    }
+
+    const result = await this.api.saveEmail(token, normalized);
+
+    if (!result.ok) {
+      if (showError) {
+        this.store.setState({
+          error: result.error || 'Failed to save email. Please try again.',
+        });
+      }
+      return false;
+    }
+
+    const storagePrefix = this.config.storageKeyPrefix ?? 'chat-widget';
+    localStorage.setItem(`${storagePrefix}-email`, normalized);
+    localStorage.setItem(`${storagePrefix}-email-visitor-id`, visitorId);
+    return true;
+  }
+
+  private async submitEmail(email: string): Promise<void> {
+    const { session } = this.store.getState();
+    if (!session) {
+      this.store.setState({ error: 'Session not initialized. Please refresh the page.' });
+      return;
+    }
+
+    this.store.setState({ error: null });
+    const saved = await this.syncEmailToSession(session.token, session.visitorId, email, true);
+    if (!saved) return;
+
+    this.store.setState({
+      emailSubmitted: true,
+      showEmailStep: false,
+      error: null,
     });
   }
 
   private async sendMessage(text: string): Promise<void> {
     const state = this.store.getState();
     
-    if (!state.session || !state.selectedCategory) {
+    if (!state.session) {
+      this.store.setState({ error: 'Session not initialized. Please refresh the page.' });
+      return;
+    }
+
+    if (!state.selectedCategory) {
       this.store.setState({ showCategories: true });
       return;
+    }
+
+    const requiresEmail = this.config.requireEmail ?? true;
+    if (requiresEmail && !state.emailSubmitted && state.messages.length === 0) {
+      this.store.setState({ showEmailStep: true, error: null });
+      return;
+    }
+
+    // Ensure stored email remains linked after session churn.
+    const storagePrefix = this.config.storageKeyPrefix ?? 'chat-widget';
+    const storedEmail = this.normalizeEmail(localStorage.getItem(`${storagePrefix}-email`) ?? '');
+    if (
+      requiresEmail &&
+      state.emailSubmitted &&
+      this.isValidEmail(storedEmail) &&
+      localStorage.getItem(`${storagePrefix}-email-visitor-id`) !== state.session.visitorId
+    ) {
+      await this.syncEmailToSession(state.session.token, state.session.visitorId, storedEmail);
     }
 
     // Optimistic update

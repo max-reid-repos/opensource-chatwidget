@@ -42,6 +42,7 @@ db.exec(`
     ip_address TEXT NOT NULL,
     user_agent TEXT,
     fingerprint TEXT NOT NULL,
+    email TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     expires_at DATETIME NOT NULL
   );
@@ -52,6 +53,7 @@ db.exec(`
     text TEXT NOT NULL,
     sender TEXT NOT NULL CHECK (sender IN ('visitor', 'admin')),
     category TEXT,
+    sent_via_telegram INTEGER DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -64,6 +66,21 @@ db.exec(`
     UNIQUE(visitor_id, endpoint)
   );
 `);
+
+// Lightweight migrations for existing local databases
+try {
+  const sessionColumns = db.pragma('table_info(chat_visitor_sessions)');
+  if (!sessionColumns.some((col) => col.name === 'email')) {
+    db.exec('ALTER TABLE chat_visitor_sessions ADD COLUMN email TEXT');
+  }
+
+  const messageColumns = db.pragma('table_info(chat_messages)');
+  if (!messageColumns.some((col) => col.name === 'sent_via_telegram')) {
+    db.exec('ALTER TABLE chat_messages ADD COLUMN sent_via_telegram INTEGER DEFAULT 0');
+  }
+} catch (error) {
+  console.error('[Migration] Failed applying chat schema updates:', error);
+}
 
 // ============================================
 // SECURITY HELPERS
@@ -116,6 +133,40 @@ function getUserAgent(req) {
   return req.headers['user-agent'] || 'unknown';
 }
 
+function verifyVisitorRequest(req, token) {
+  const payload = verifyToken(token);
+  if (!payload) {
+    return { valid: false, status: 401, error: 'Invalid or expired token' };
+  }
+
+  // Verify fingerprint matches request in production
+  const currentFingerprint = createFingerprint(getClientIp(req), getUserAgent(req));
+  if (payload.fingerprint !== currentFingerprint && process.env.NODE_ENV === 'production') {
+    return { valid: false, status: 401, error: 'Fingerprint mismatch' };
+  }
+
+  // Verify session still exists
+  const session = db.prepare(`
+    SELECT visitor_id FROM chat_visitor_sessions
+    WHERE visitor_id = ? AND expires_at > datetime('now')
+    LIMIT 1
+  `).get(payload.visitorId);
+
+  if (!session) {
+    return { valid: false, status: 401, error: 'Session expired' };
+  }
+
+  return { valid: true, visitorId: payload.visitorId };
+}
+
+function normalizeEmail(email) {
+  return String(email || '').trim().toLowerCase();
+}
+
+function isValidEmail(email) {
+  return email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
 // ============================================
 // RATE LIMITING
 // ============================================
@@ -124,6 +175,7 @@ const RATE_LIMITS = {
   sendMessage: { max: 10, windowMinutes: 5 },
   loadMessages: { max: 120, windowMinutes: 1 },
   createSession: { max: 5, windowMinutes: 60 },
+  updateEmail: { max: 20, windowMinutes: 60 },
 };
 
 function checkRateLimit(visitorId, endpoint) {
@@ -157,6 +209,96 @@ function incrementRateLimit(visitorId, endpoint) {
       reset_at = CASE WHEN reset_at <= datetime('now') THEN excluded.reset_at ELSE reset_at END
   `);
   stmt.run(visitorId, endpoint, resetAt);
+}
+
+// ============================================
+// OPTIONAL TELEGRAM HELPERS
+// ============================================
+
+const TELEGRAM_API = 'https://api.telegram.org/bot';
+
+function isTelegramEnabled() {
+  return Boolean(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID);
+}
+
+function escapeHtml(text) {
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function getVisitorEmail(visitorId) {
+  const row = db.prepare(`
+    SELECT email FROM chat_visitor_sessions
+    WHERE visitor_id = ?
+    LIMIT 1
+  `).get(visitorId);
+  return row?.email || null;
+}
+
+function formatTelegramVisitorMessage(visitorId, message, category, email, isNewConversation = false) {
+  const safeMessage = escapeHtml(message);
+  const safeEmail = email ? escapeHtml(email) : null;
+  const safeCategory = category ? escapeHtml(category) : 'general';
+  const header = isNewConversation
+    ? `🆕 <b>New Conversation</b>\n🏷️ <b>${safeCategory}</b>`
+    : `💬 <b>${safeCategory}</b>`;
+  const emailLine = safeEmail ? `\n📧 <b>${safeEmail}</b>` : '';
+
+  return `${header}
+
+🧑 <code>${visitorId}</code>${emailLine}
+
+${safeMessage}
+
+<i>Reply to this message to respond in chat.</i>`;
+}
+
+async function sendTelegramMessage(text) {
+  if (!isTelegramEnabled()) return { ok: false };
+
+  try {
+    const response = await fetch(`${TELEGRAM_API}${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: process.env.TELEGRAM_CHAT_ID,
+        text,
+        parse_mode: 'HTML',
+      }),
+    });
+
+    const data = await response.json();
+    if (!response.ok || !data?.ok) {
+      console.error('[Telegram] sendMessage failed:', data?.description || `HTTP ${response.status}`);
+      return { ok: false };
+    }
+
+    return { ok: true };
+  } catch (error) {
+    console.error('[Telegram] sendMessage error:', error);
+    return { ok: false };
+  }
+}
+
+async function notifyTelegramVisitorMessage(visitorId, message, category, isNewConversation = false) {
+  if (!isTelegramEnabled()) return;
+
+  const email = getVisitorEmail(visitorId);
+  const formatted = formatTelegramVisitorMessage(
+    visitorId,
+    message,
+    category,
+    email,
+    isNewConversation
+  );
+  await sendTelegramMessage(formatted);
+}
+
+function extractVisitorIdFromText(text) {
+  const match = String(text || '').match(/(visitor_[a-zA-Z0-9]+)/);
+  return match ? match[1] : null;
 }
 
 // ============================================
@@ -196,84 +338,153 @@ app.post('/api/chat/init', (req, res) => {
 
 // GET /api/chat/messages - Get messages for visitor
 app.get('/api/chat/messages', (req, res) => {
-  const token = req.query.token;
+  const token = typeof req.query.token === 'string' ? req.query.token : '';
   if (!token) return res.status(401).json({ error: 'Token required' });
 
-  const payload = verifyToken(token);
-  if (!payload) return res.status(401).json({ error: 'Invalid or expired token' });
+  const verification = verifyVisitorRequest(req, token);
+  if (!verification.valid) {
+    return res.status(verification.status).json({ error: verification.error });
+  }
+
+  const visitorId = verification.visitorId;
 
   // Rate limit
-  const rateCheck = checkRateLimit(payload.visitorId, 'loadMessages');
+  const rateCheck = checkRateLimit(visitorId, 'loadMessages');
   if (!rateCheck.allowed) {
     return res.status(429).json({ error: 'Too many requests', resetIn: rateCheck.resetIn });
   }
 
-  // Verify session exists
-  const session = db.prepare(`
-    SELECT visitor_id FROM chat_visitor_sessions
-    WHERE visitor_id = ? AND expires_at > datetime('now')
-  `).get(payload.visitorId);
-
-  if (!session) return res.status(401).json({ error: 'Session expired' });
-
   // Get messages
   const messages = db.prepare(`
-    SELECT id, text, sender, category, created_at as timestamp
+    SELECT id, text, sender, category, sent_via_telegram, created_at as timestamp
     FROM chat_messages
     WHERE visitor_id = ?
-    ORDER BY created_at ASC
-  `).all(payload.visitorId);
+    ORDER BY created_at ASC, id ASC
+  `).all(visitorId);
 
-  incrementRateLimit(payload.visitorId, 'loadMessages');
+  incrementRateLimit(visitorId, 'loadMessages');
 
-  res.json({ messages });
+  res.json({
+    messages: messages.map((message) => ({
+      id: String(message.id),
+      text: message.text,
+      sender: message.sender,
+      category: message.category,
+      sent_via_telegram: message.sent_via_telegram === 1,
+      timestamp: message.timestamp,
+    })),
+  });
+});
+
+// POST /api/chat/email - Save visitor email on session
+app.post('/api/chat/email', (req, res) => {
+  const { token, email } = req.body || {};
+
+  if (!token || typeof token !== 'string') return res.status(401).json({ error: 'Token required' });
+
+  const normalizedEmail = normalizeEmail(email);
+  if (!isValidEmail(normalizedEmail)) {
+    return res.status(400).json({ error: 'Valid email required' });
+  }
+
+  const verification = verifyVisitorRequest(req, token);
+  if (!verification.valid) {
+    return res.status(verification.status).json({ error: verification.error });
+  }
+
+  const visitorId = verification.visitorId;
+
+  const rateCheck = checkRateLimit(visitorId, 'updateEmail');
+  if (!rateCheck.allowed) {
+    return res.status(429).json({
+      error: 'Too many email update attempts. Please wait before trying again.',
+      resetIn: rateCheck.resetIn,
+    });
+  }
+
+  const result = db.prepare(`
+    UPDATE chat_visitor_sessions
+    SET email = ?
+    WHERE visitor_id = ?
+  `).run(normalizedEmail, visitorId);
+
+  if (result.changes === 0) {
+    return res.status(404).json({ error: 'Visitor session not found' });
+  }
+
+  incrementRateLimit(visitorId, 'updateEmail');
+  res.json({ success: true, email: normalizedEmail });
 });
 
 // POST /api/chat/send - Send a message
-app.post('/api/chat/send', (req, res) => {
-  const { token, text, category } = req.body;
+app.post('/api/chat/send', async (req, res) => {
+  const { token, text, category } = req.body || {};
 
-  if (!token) return res.status(401).json({ error: 'Token required' });
+  if (!token || typeof token !== 'string') return res.status(401).json({ error: 'Token required' });
   if (!text || typeof text !== 'string') return res.status(400).json({ error: 'Text required' });
   if (text.length > 2000) return res.status(400).json({ error: 'Message too long' });
+  if (category != null && typeof category !== 'string') {
+    return res.status(400).json({ error: 'Category must be a string' });
+  }
 
-  const payload = verifyToken(token);
-  if (!payload) return res.status(401).json({ error: 'Invalid or expired token' });
+  const verification = verifyVisitorRequest(req, token);
+  if (!verification.valid) {
+    return res.status(verification.status).json({ error: verification.error });
+  }
+
+  const visitorId = verification.visitorId;
+  const sanitizedText = text.trim();
+  if (!sanitizedText) return res.status(400).json({ error: 'Text required' });
 
   // Rate limit
-  const rateCheck = checkRateLimit(payload.visitorId, 'sendMessage');
+  const rateCheck = checkRateLimit(visitorId, 'sendMessage');
   if (!rateCheck.allowed) {
     return res.status(429).json({ error: 'Too many messages', resetIn: rateCheck.resetIn });
   }
 
-  // Store message
-  const stmt = db.prepare(`
-    INSERT INTO chat_messages (visitor_id, text, sender, category)
-    VALUES (?, ?, 'visitor', ?)
-  `);
-  const result = stmt.run(payload.visitorId, text.trim(), category || null);
+  // Evaluate conversation state before inserting the new message.
+  const hasAnyPreviousMessages = Boolean(db.prepare(`
+    SELECT 1 FROM chat_messages WHERE visitor_id = ? LIMIT 1
+  `).get(visitorId));
+  const hasExistingAdminMessage = Boolean(db.prepare(`
+    SELECT 1 FROM chat_messages WHERE visitor_id = ? AND sender = 'admin' LIMIT 1
+  `).get(visitorId));
 
-  incrementRateLimit(payload.visitorId, 'sendMessage');
+  // Store visitor message
+  const result = db.prepare(`
+    INSERT INTO chat_messages (visitor_id, text, sender, category, sent_via_telegram)
+    VALUES (?, ?, 'visitor', ?, 0)
+  `).run(visitorId, sanitizedText, category || null);
 
-  // Check if first message → send auto-response
-  const count = db.prepare(`
-    SELECT COUNT(*) as c FROM chat_messages WHERE visitor_id = ? AND sender = 'visitor'
-  `).get(payload.visitorId);
+  incrementRateLimit(visitorId, 'sendMessage');
 
-  let autoResponse = null;
-  if (count.c === 1) {
-    autoResponse = "Thanks for your message! We'll get back to you soon.";
-    db.prepare(`
-      INSERT INTO chat_messages (visitor_id, text, sender, category)
-      VALUES (?, ?, 'admin', ?)
-    `).run(payload.visitorId, autoResponse, category || null);
+  // Optional Telegram notification (fire-and-forget)
+  if (isTelegramEnabled()) {
+    notifyTelegramVisitorMessage(
+      visitorId,
+      sanitizedText,
+      category || 'general',
+      !hasAnyPreviousMessages
+    ).catch((error) => {
+      console.error('[Telegram] Visitor notification failed:', error);
+    });
   }
 
-  res.json({ 
-    success: true, 
+  // Auto-response should only happen once per visitor conversation unless an admin has replied.
+  let autoResponse = null;
+  if (!hasExistingAdminMessage) {
+    autoResponse = "Thanks for your message! We'll get back to you soon.";
+    db.prepare(`
+      INSERT INTO chat_messages (visitor_id, text, sender, category, sent_via_telegram)
+      VALUES (?, ?, 'admin', ?, 0)
+    `).run(visitorId, autoResponse, category || null);
+  }
+
+  res.json({
+    success: true,
     messageId: result.lastInsertRowid.toString(),
     autoResponse,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
   });
 });
 
@@ -283,6 +494,69 @@ app.get('/api/chat/status', (req, res) => {
   res.json({ online: true });
 });
 
+// POST /api/telegram/webhook - Ingest Telegram admin replies (optional)
+app.post('/api/telegram/webhook', (req, res) => {
+  if (!isTelegramEnabled()) {
+    return res.status(404).json({ error: 'Telegram integration not enabled' });
+  }
+
+  const configuredSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
+  const requestSecret = req.headers['x-telegram-bot-api-secret-token'];
+  if (configuredSecret && requestSecret !== configuredSecret) {
+    return res.status(401).json({ error: 'Invalid webhook secret' });
+  }
+
+  try {
+    const message = req.body?.message;
+    if (!message?.text) {
+      return res.json({ ok: true });
+    }
+
+    // Ignore bot-originated messages to avoid loops.
+    if (message?.from?.is_bot) {
+      return res.json({ ok: true });
+    }
+
+    const commandMatch = String(message.text).match(/^\/reply\s+(visitor_[a-zA-Z0-9]+)\s+([\s\S]+)/i);
+    const visitorId = commandMatch
+      ? commandMatch[1]
+      : extractVisitorIdFromText(message.reply_to_message?.text);
+    const replyText = commandMatch ? commandMatch[2].trim() : String(message.text || '').trim();
+
+    if (!visitorId || !replyText) {
+      return res.json({ ok: true });
+    }
+
+    const exists = db.prepare(`
+      SELECT 1 FROM chat_messages WHERE visitor_id = ? LIMIT 1
+    `).get(visitorId);
+
+    if (!exists) {
+      return res.status(404).json({ error: 'Visitor not found' });
+    }
+
+    const firstMessage = db.prepare(`
+      SELECT category
+      FROM chat_messages
+      WHERE visitor_id = ?
+      ORDER BY created_at ASC, id ASC
+      LIMIT 1
+    `).get(visitorId);
+
+    const category = firstMessage?.category || null;
+
+    db.prepare(`
+      INSERT INTO chat_messages (visitor_id, text, sender, category, sent_via_telegram)
+      VALUES (?, ?, 'admin', ?, 1)
+    `).run(visitorId, replyText, category);
+
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error('[Telegram] Webhook processing failed:', error);
+    return res.status(500).json({ error: 'Failed to process webhook' });
+  }
+});
+
 // ============================================
 // ADMIN ROUTES (for testing)
 // ============================================
@@ -290,13 +564,15 @@ app.get('/api/chat/status', (req, res) => {
 // GET /api/admin/conversations - List all conversations
 app.get('/api/admin/conversations', (req, res) => {
   const conversations = db.prepare(`
-    SELECT 
-      visitor_id,
-      COUNT(*) as message_count,
-      MAX(created_at) as last_message,
-      MIN(created_at) as first_message
-    FROM chat_messages
-    GROUP BY visitor_id
+    SELECT
+      m.visitor_id,
+      s.email as visitor_email,
+      COUNT(m.id) as message_count,
+      MAX(m.created_at) as last_message,
+      MIN(m.created_at) as first_message
+    FROM chat_messages m
+    LEFT JOIN chat_visitor_sessions s ON s.visitor_id = m.visitor_id
+    GROUP BY m.visitor_id
     ORDER BY last_message DESC
   `).all();
 
@@ -307,15 +583,33 @@ app.get('/api/admin/conversations', (req, res) => {
 app.post('/api/admin/reply', (req, res) => {
   const { visitorId, text } = req.body;
 
-  if (!visitorId || !text) {
+  if (!visitorId || !text || typeof text !== 'string') {
     return res.status(400).json({ error: 'visitorId and text required' });
   }
 
+  const trimmedText = text.trim();
+  if (!trimmedText) {
+    return res.status(400).json({ error: 'Text required' });
+  }
+
+  const exists = db.prepare(`
+    SELECT 1 FROM chat_messages WHERE visitor_id = ? LIMIT 1
+  `).get(visitorId);
+
+  if (!exists) {
+    return res.status(404).json({ error: 'Visitor not found' });
+  }
+
+  const firstMessage = db.prepare(`
+    SELECT category FROM chat_messages WHERE visitor_id = ? ORDER BY created_at ASC, id ASC LIMIT 1
+  `).get(visitorId);
+  const category = firstMessage?.category || null;
+
   const stmt = db.prepare(`
-    INSERT INTO chat_messages (visitor_id, text, sender)
-    VALUES (?, ?, 'admin')
+    INSERT INTO chat_messages (visitor_id, text, sender, category, sent_via_telegram)
+    VALUES (?, ?, 'admin', ?, 0)
   `);
-  const result = stmt.run(visitorId, text.trim());
+  const result = stmt.run(visitorId, trimmedText, category);
 
   res.json({ success: true, messageId: result.lastInsertRowid.toString() });
 });
@@ -328,3 +622,4 @@ app.listen(PORT, () => {
   console.log(`Chat widget backend running at http://localhost:${PORT}`);
   console.log(`Open http://localhost:${PORT} in your browser to see the demo`);
 });
+
