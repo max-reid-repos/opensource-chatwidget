@@ -155,12 +155,13 @@ Check if support is online.
 ### `POST /api/telegram/webhook` (Optional)
 Process admin replies from Telegram and insert them into the visitor conversation.
 If configured, verify `x-telegram-bot-api-secret-token` using `TELEGRAM_WEBHOOK_SECRET`.
+Use your canonical domain when registering the webhook URL, and avoid HTTP redirects.
 
 ## Backend Implementation
 
 See `examples/express/server.js` for a complete reference implementation including:
 - Token generation with HMAC signatures
-- Fingerprint verification (IP + User-Agent)
+- Session verification with User-Agent checks and optional strict IP+User-Agent mode
 - Rate limiting
 - SQLite database
 
@@ -267,7 +268,8 @@ The widget uses CSS classes prefixed with `.chat-widget-`. Override them in your
 
 ## Security Notes
 
-- Visitor tokens are HMAC-signed and tied to IP + User-Agent fingerprint
+- Visitor tokens are HMAC-signed and tied to server-tracked sessions
+- User-Agent validation is enforced, and strict IP+User-Agent validation is optional (`CHAT_STRICT_FINGERPRINT=true`)
 - Rate limiting prevents spam and session enumeration
 - All messages are scoped to verified visitor sessions
 - No client-side visitor ID generation (prevents spoofing)

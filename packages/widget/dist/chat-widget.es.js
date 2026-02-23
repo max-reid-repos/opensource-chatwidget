@@ -80,12 +80,12 @@ const x = {
   send: '<svg class="chat-widget-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>',
   mail: '<svg class="chat-widget-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>',
   x: '<svg class="chat-widget-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>'
-}, y = [
+}, v = [
   { id: "general", label: "General Question", icon: "💬", description: "Ask us anything" },
   { id: "support", label: "Support", icon: "🛠️", description: "Get help with your account" },
   { id: "feedback", label: "Feedback", icon: "💡", description: "Share your thoughts" }
 ];
-class v {
+class y {
   constructor(e, t) {
     this.inputRef = null, this.messagesRef = null, this.config = {
       apiUrl: e.apiUrl,
@@ -93,7 +93,7 @@ class v {
       avatarInitials: e.avatarInitials ?? "ST",
       headerTitle: e.headerTitle ?? "Support",
       welcomeMessage: e.welcomeMessage ?? "Welcome! How can we help you today?",
-      categories: e.categories ?? y,
+      categories: e.categories ?? v,
       requireEmail: e.requireEmail ?? !0,
       storageKeyPrefix: e.storageKeyPrefix ?? "chat-widget",
       pollIntervalMs: e.pollIntervalMs ?? 5e3,
@@ -769,9 +769,9 @@ function k() {
 const E = "data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuBzvLZiTYIG2m98OScTgwOUafi", I = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 class w {
   constructor(e) {
-    if (this.pollInterval = null, !e.apiUrl)
+    if (this.pollInterval = null, this.pollBackoffUntil = 0, this.isRecoveringSession = !1, !e.apiUrl)
       throw new Error("ChatWidget: apiUrl is required");
-    this.config = e, this.api = new f(e.apiUrl), this.store = b(x), k(), this.ui = new v(e, {
+    this.config = e, this.api = new f(e.apiUrl), this.store = b(x), k(), this.ui = new y(e, {
       onToggle: () => this.toggle(),
       onCategorySelect: (t) => this.selectCategory(t),
       onEmailSubmit: (t) => this.submitEmail(t),
@@ -822,7 +822,7 @@ class w {
         selectedCategory: r,
         showCategories: s.length === 0 && !r
       });
-    } else t.status === 401 ? (this.clearSession(), await this.initSession()) : t.status === 429 && this.store.setState({ error: "Too many requests. Please wait." });
+    } else t.status === 401 ? await this.recoverSession("Session expired. Refreshing...") : t.status === 429 && this.store.setState({ error: "Too many requests. Please wait." });
   }
   async checkOnlineStatus() {
     const e = await this.api.getStatus();
@@ -831,6 +831,16 @@ class w {
   clearSession() {
     const e = this.config.storageKeyPrefix ?? "chat-widget";
     localStorage.removeItem(`${e}-token`), localStorage.removeItem(`${e}-visitor-id`), this.store.setState({ session: null });
+  }
+  async recoverSession(e) {
+    if (!this.isRecoveringSession) {
+      this.isRecoveringSession = !0;
+      try {
+        this.store.setState({ error: e }), this.clearSession(), await this.initSession();
+      } finally {
+        this.isRecoveringSession = !1;
+      }
+    }
   }
   toggle() {
     const { isOpen: e } = this.store.getState();
@@ -909,7 +919,7 @@ class w {
       e,
       t.selectedCategory
     );
-    a.ok ? await this.loadMessages() : a.status === 401 ? (this.store.setState({ error: "Session expired. Refreshing..." }), this.clearSession(), await this.initSession()) : a.status === 429 ? this.store.setState({
+    a.ok ? await this.loadMessages() : a.status === 401 ? await this.recoverSession("Session expired. Refreshing...") : a.status === 429 ? this.store.setState({
       error: "Please wait before sending more messages."
     }) : this.store.setState({
       error: a.error || "Failed to send message"
@@ -920,16 +930,22 @@ class w {
     const e = this.config.pollIntervalMs ?? 5e3;
     this.pollInterval = window.setInterval(async () => {
       const t = this.store.getState();
-      if (!t.isOpen || !t.session) return;
+      if (!t.isOpen || !t.session || this.isRecoveringSession || Date.now() < this.pollBackoffUntil) return;
       const i = await this.api.getMessages(t.session.token);
       if (i.ok && i.data) {
+        this.pollBackoffUntil = 0;
         const s = i.data.messages || [], o = new Set(t.messages.map((a) => a.id)), r = s.filter((a) => !o.has(a.id));
         r.length > 0 && (this.store.setState({ messages: s }), r.some((a) => a.sender === "admin") && this.playNotificationSound());
+      } else if (i.status === 401)
+        await this.recoverSession("Session expired. Refreshing...");
+      else if (i.status === 429) {
+        const s = Math.max(e * 3, 15e3);
+        this.pollBackoffUntil = Date.now() + s;
       }
     }, e);
   }
   stopPolling() {
-    this.pollInterval && (clearInterval(this.pollInterval), this.pollInterval = null);
+    this.pollInterval && (clearInterval(this.pollInterval), this.pollInterval = null), this.pollBackoffUntil = 0;
   }
   playNotificationSound() {
     try {

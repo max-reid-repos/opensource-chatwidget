@@ -13,6 +13,8 @@ export class ChatWidget {
   private store: Store;
   private ui: WidgetUI;
   private pollInterval: number | null = null;
+  private pollBackoffUntil = 0;
+  private isRecoveringSession = false;
   private config: ChatWidgetConfig;
 
   constructor(config: ChatWidgetConfig) {
@@ -138,9 +140,7 @@ export class ChatWidget {
         showCategories: messages.length === 0 && !inferredCategory,
       });
     } else if (result.status === 401) {
-      // Token expired, reinitialize
-      this.clearSession();
-      await this.initSession();
+      await this.recoverSession('Session expired. Refreshing...');
     } else if (result.status === 429) {
       this.store.setState({ error: `Too many requests. Please wait.` });
     }
@@ -158,6 +158,19 @@ export class ChatWidget {
     localStorage.removeItem(`${storagePrefix}-token`);
     localStorage.removeItem(`${storagePrefix}-visitor-id`);
     this.store.setState({ session: null });
+  }
+
+  private async recoverSession(errorMessage: string): Promise<void> {
+    if (this.isRecoveringSession) return;
+
+    this.isRecoveringSession = true;
+    try {
+      this.store.setState({ error: errorMessage });
+      this.clearSession();
+      await this.initSession();
+    } finally {
+      this.isRecoveringSession = false;
+    }
   }
 
   private toggle(): void {
@@ -300,9 +313,7 @@ export class ChatWidget {
       // Reload messages to get server-confirmed state
       await this.loadMessages();
     } else if (result.status === 401) {
-      this.store.setState({ error: 'Session expired. Refreshing...' });
-      this.clearSession();
-      await this.initSession();
+      await this.recoverSession('Session expired. Refreshing...');
     } else if (result.status === 429) {
       this.store.setState({ 
         error: 'Please wait before sending more messages.' 
@@ -324,10 +335,13 @@ export class ChatWidget {
     this.pollInterval = window.setInterval(async () => {
       const state = this.store.getState();
       if (!state.isOpen || !state.session) return;
+      if (this.isRecoveringSession) return;
+      if (Date.now() < this.pollBackoffUntil) return;
 
       const result = await this.api.getMessages(state.session.token);
 
       if (result.ok && result.data) {
+        this.pollBackoffUntil = 0;
         const newMessages = result.data.messages || [];
         const existingIds = new Set(state.messages.map(m => m.id));
         const newlyAdded = newMessages.filter(m => !existingIds.has(m.id));
@@ -340,6 +354,11 @@ export class ChatWidget {
             this.playNotificationSound();
           }
         }
+      } else if (result.status === 401) {
+        await this.recoverSession('Session expired. Refreshing...');
+      } else if (result.status === 429) {
+        const nextDelayMs = Math.max(pollMs * 3, 15000);
+        this.pollBackoffUntil = Date.now() + nextDelayMs;
       }
     }, pollMs);
   }
@@ -349,6 +368,7 @@ export class ChatWidget {
       clearInterval(this.pollInterval);
       this.pollInterval = null;
     }
+    this.pollBackoffUntil = 0;
   }
 
   private playNotificationSound(): void {

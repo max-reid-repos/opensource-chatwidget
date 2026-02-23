@@ -122,15 +122,36 @@ function verifyToken(token) {
   }
 }
 
+function getHeaderValue(req, name) {
+  const value = req.headers[name];
+  if (Array.isArray(value)) {
+    return value[0] || '';
+  }
+  return String(value || '');
+}
+
 function getClientIp(req) {
-  return req.headers['x-forwarded-for']?.split(',')[0]?.trim() 
-    || req.headers['x-real-ip'] 
-    || req.ip 
-    || '0.0.0.0';
+  const cfConnectingIp = getHeaderValue(req, 'cf-connecting-ip').trim();
+  if (cfConnectingIp) return cfConnectingIp;
+
+  const forwardedFor = getHeaderValue(req, 'x-forwarded-for')
+    .split(',')
+    .map((part) => part.trim())
+    .find(Boolean);
+  if (forwardedFor) return forwardedFor;
+
+  const realIp = getHeaderValue(req, 'x-real-ip').trim();
+  if (realIp) return realIp;
+
+  return req.ip || '0.0.0.0';
 }
 
 function getUserAgent(req) {
   return req.headers['user-agent'] || 'unknown';
+}
+
+function isStrictFingerprintEnabled() {
+  return String(process.env.CHAT_STRICT_FINGERPRINT || '').toLowerCase() === 'true';
 }
 
 function verifyVisitorRequest(req, token) {
@@ -139,21 +160,42 @@ function verifyVisitorRequest(req, token) {
     return { valid: false, status: 401, error: 'Invalid or expired token' };
   }
 
-  // Verify fingerprint matches request in production
-  const currentFingerprint = createFingerprint(getClientIp(req), getUserAgent(req));
-  if (payload.fingerprint !== currentFingerprint && process.env.NODE_ENV === 'production') {
-    return { valid: false, status: 401, error: 'Fingerprint mismatch' };
-  }
-
   // Verify session still exists
   const session = db.prepare(`
-    SELECT visitor_id FROM chat_visitor_sessions
+    SELECT visitor_id, user_agent, fingerprint
+    FROM chat_visitor_sessions
     WHERE visitor_id = ? AND expires_at > datetime('now')
     LIMIT 1
   `).get(payload.visitorId);
 
   if (!session) {
     return { valid: false, status: 401, error: 'Session expired' };
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    const requestUserAgent = getUserAgent(req);
+    const requestFingerprint = createFingerprint(getClientIp(req), requestUserAgent);
+    const matchesCurrentFingerprint = payload.fingerprint === requestFingerprint;
+
+    if (!matchesCurrentFingerprint) {
+      // Signed token fingerprint must still match the server-stored session row.
+      const matchesStoredFingerprint = payload.fingerprint === session.fingerprint;
+      if (!matchesStoredFingerprint) {
+        return { valid: false, status: 401, error: 'Session fingerprint mismatch' };
+      }
+
+      // User-agent drift is treated as suspicious. IP drift is tolerated by default.
+      const storedUserAgent = session.user_agent || '';
+      const userAgentMatches = !storedUserAgent || storedUserAgent === requestUserAgent;
+      if (!userAgentMatches) {
+        return { valid: false, status: 401, error: 'User-Agent mismatch' };
+      }
+
+      // Set CHAT_STRICT_FINGERPRINT=true to enforce exact IP+UA fingerprint matching.
+      if (isStrictFingerprintEnabled()) {
+        return { valid: false, status: 401, error: 'Fingerprint mismatch' };
+      }
+    }
   }
 
   return { valid: true, visitorId: payload.visitorId };
@@ -297,8 +339,14 @@ async function notifyTelegramVisitorMessage(visitorId, message, category, isNewC
 }
 
 function extractVisitorIdFromText(text) {
-  const match = String(text || '').match(/(visitor_[a-zA-Z0-9]+)/);
-  return match ? match[1] : null;
+  const rawText = String(text || '');
+  const directMatch = rawText.match(/visitor_[a-zA-Z0-9]+/i);
+  if (directMatch) return directMatch[0];
+
+  // Telegram clients can wrap long IDs across lines in reply previews.
+  const compactText = rawText.replace(/\s+/g, '');
+  const compactMatch = compactText.match(/visitor_[a-zA-Z0-9]+/i);
+  return compactMatch ? compactMatch[0] : null;
 }
 
 // ============================================

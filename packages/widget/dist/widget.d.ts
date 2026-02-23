@@ -4,12 +4,15 @@ export declare class ChatWidget {
     private store;
     private ui;
     private pollInterval;
+    private pollBackoffUntil;
+    private isRecoveringSession;
     private config;
     constructor(config: ChatWidgetConfig);
     private initSession;
     private loadMessages;
     private checkOnlineStatus;
     private clearSession;
+    private recoverSession;
     private toggle;
     private selectCategory;
     private normalizeEmail;
